@@ -5,10 +5,9 @@ package data.scripts.campaign.submarkets;
 
 import com.fs.starfarer.api.Global;
 import com.fs.starfarer.api.campaign.*;
+import com.fs.starfarer.api.campaign.econ.EconomyAPI.EconomyUpdateListener;
 import com.fs.starfarer.api.campaign.econ.SubmarketAPI;
-import com.fs.starfarer.api.combat.ShipAPI;
 import com.fs.starfarer.api.fleet.FleetMemberAPI;
-import com.fs.starfarer.api.impl.campaign.ids.Commodities;
 import com.fs.starfarer.api.impl.campaign.ids.Factions;
 import com.fs.starfarer.api.impl.campaign.submarkets.BaseSubmarketPlugin;
 import com.fs.starfarer.api.util.Highlights;
@@ -18,39 +17,23 @@ import java.util.*;
 
 public class tahlan_GreatHousesConversionSubmarketUNFINISHED extends BaseSubmarketPlugin {
 
-    //Table for the different hull sizes available and which reputation you need to convert them. Note that fighters are not allowed to be sold to the market, but are there as a fail-safe anyway
-    private static final Map<ShipAPI.HullSize, RepLevel> REPUTATION_TABLE = new HashMap<>(5);
+    //This is how much reputation is needed to be allowed into the Great Houses submarket.
+    private static final RepLevel REPUTATION_NEEDED_FOR_MARKET = RepLevel.WELCOMING;
+
+    //The ID of the Great Houses faction
+    private static final String GREAT_HOUSES_FACTION_ID = "tahlan_great_houses";
+
+    //A list of all valid refits and their data. The refits at the top of the list take precedence if multiple
+    //alternatives could be "crafted", but overlap should still be avoided
+    private static final List<RefitData> REFIT_DATAS = new ArrayList<>();
     static {
-        REPUTATION_TABLE.put(ShipAPI.HullSize.FIGHTER, RepLevel.FRIENDLY);
-        REPUTATION_TABLE.put(ShipAPI.HullSize.FRIGATE, RepLevel.FRIENDLY);
-        REPUTATION_TABLE.put(ShipAPI.HullSize.DESTROYER, RepLevel.FRIENDLY);
-        REPUTATION_TABLE.put(ShipAPI.HullSize.CRUISER, RepLevel.COOPERATIVE);
-        REPUTATION_TABLE.put(ShipAPI.HullSize.CAPITAL_SHIP, RepLevel.COOPERATIVE);
+        REFIT_DATAS.add(new RefitData("tahlan_legion_gh", "legion", "doom"));
+        REFIT_DATAS.add(new RefitData("tahlan_Castigator_knight", "eagle", "onslaught"));
     }
 
-    //Table for the different hull sizes available and which commodity you need to convert them. Note that fighters are not allowed to be sold to the market, but are there as a fail-safe anyway
-    private static final Map<ShipAPI.HullSize, String> COST_TABLE = new HashMap<>(5);
-    static {
-        COST_TABLE.put(ShipAPI.HullSize.FIGHTER, Commodities.GAMMA_CORE);
-        COST_TABLE.put(ShipAPI.HullSize.FRIGATE, Commodities.BETA_CORE);
-        COST_TABLE.put(ShipAPI.HullSize.DESTROYER, Commodities.BETA_CORE);
-        COST_TABLE.put(ShipAPI.HullSize.CRUISER, Commodities.ALPHA_CORE);
-        COST_TABLE.put(ShipAPI.HullSize.CAPITAL_SHIP, Commodities.ALPHA_CORE);
-    }
 
-    //Table for the different hull sizes available and how many days it takes to refit them. Note that fighters are not allowed to be sold to the market, but are there as a fail-safe anyway
-    private static final Map<ShipAPI.HullSize, Float> TIME_TABLE = new HashMap<>(5);
-    static {
-        TIME_TABLE.put(ShipAPI.HullSize.FIGHTER, 1f);
-        TIME_TABLE.put(ShipAPI.HullSize.FRIGATE, 5f);
-        TIME_TABLE.put(ShipAPI.HullSize.DESTROYER, 10f);
-        TIME_TABLE.put(ShipAPI.HullSize.CRUISER, 15f);
-        TIME_TABLE.put(ShipAPI.HullSize.CAPITAL_SHIP, 25f);
-    }
-
-    //Minimum standing for the market to be open: pretty high, since they need to be sure you're not trying to enslave AI cores
-    private static final RepLevel MIN_STANDING = RepLevel.FRIENDLY;
-
+    //Initialize some in-script variables used here and there
+    private MarketMonthEndReporter updateListener = null;
 
     //Initializer function; just run the original init
     @Override
@@ -64,10 +47,10 @@ public class tahlan_GreatHousesConversionSubmarketUNFINISHED extends BaseSubmark
         return false;
     }
 
-    //Simply returns the tariff of the submarket (this is only half as much as normal, but since we pay with AI cores, it shouldn't cause any notable issues unless *extremely* expensive ships are being sold)
+    //Simply returns the tariff of the submarket
     @Override
     public float getTariff() {
-        return (market.getTariff().getModifiedValue()*0.5f);
+        return market.getTariff().getModifiedValue();
     }
 
     //No commodities may be sold on the market
@@ -76,7 +59,7 @@ public class tahlan_GreatHousesConversionSubmarketUNFINISHED extends BaseSubmark
         return true;
     }
 
-    //Prevent selling actions; really, this is the same as above, but required
+    //Prevent selling actions; really, this is the same as above, but required anyhow for some reason
     @Override
     public boolean isIllegalOnSubmarket(CargoStackAPI stack, TransferAction action) {
         return action == TransferAction.PLAYER_SELL;
@@ -85,63 +68,88 @@ public class tahlan_GreatHousesConversionSubmarketUNFINISHED extends BaseSubmark
     //Changes the verb for selling/bying ships (go figure!)
     @Override
     public String getSellVerb() {
-        return "Convert";
+        return "Deposit";
     }
     @Override
     public String getBuyVerb() {
         return "Retrieve";
     }
 
+
+    //The main advance() function: mostly just adds a listener to the economy
+    @Override
+    public void advance(float amount) {
+        //Run our overridden advance function
+        super.advance(amount);
+
+        //Get us an economy listener, if we don't already have one
+        if (updateListener == null) {
+            updateListener = new MarketMonthEndReporter(this);
+            Global.getSector().getEconomy().addUpdateListener(updateListener);
+        }
+    }
+
+
+    //This is the function that gets called by our economy update listener when the economy updates
+    public void reportEconomyHasUpdated () {
+        //Go through all our refit datas, and see which ones match. Keep going until we've tried them all and failed them
+        boolean shouldBreakFull = false;
+        while (!shouldBreakFull) {
+            for (RefitData data : REFIT_DATAS) {
+                //Stores a varible for each component hull type, so we know how many we need
+                Map<String, Integer> requiredHulls = new HashMap<>();
+                for (int i = 0; i < data.componentHulls.length; i++) {
+                    if (requiredHulls.containsKey(data.componentHulls[i])) {
+                        requiredHulls.put(data.componentHulls[i], requiredHulls.get(data.componentHulls[i])+1);
+                    }
+                }
+
+                //CONTINUE HERE
+
+                //First, find if the submarket has the ships needed for the refit
+                for (FleetMemberAPI member : getCargo().getMothballedShips().getMembersListCopy()) {
+
+                }
+            }
+            shouldBreakFull = true;
+        }
+    }
+
+
     //The text that is returned when you are informed *why* you aren't allowed to sell stuff on the normal market
     @Override
     public String getIllegalTransferText(CargoStackAPI stack, TransferAction action) {
         if (action == TransferAction.PLAYER_SELL) {
-            return "Sylph-core installation services does not conduct commodity trade.";
+            return "This submarket does not conduct commodity trade.";
         }
 
-        return "AN ERROR OCURRED IN tahlan_GreatHousesConversionSubmarketUNFINISHED.java: CONTACT THE MOD AUTHOR (Nicke535)";
+        return "AN ERROR OCURRED IN tahlan_GreatHousesConversionSubmarketUNFINISHED.java: CONTACT Nicke535 OR Nia";
     }
 
-    //Description text for trying to sell a ship to the submarket that you, for some reason, can't
+    //Description text for trying to sell a ship to the submarket that you, for some reason, can't.
+    //This should never appear, so always show error text
     @Override
     public String getIllegalTransferText(FleetMemberAPI member, TransferAction action) {
-        //Check if we are not a proper sylphon design
-        if (!isValidSylphonDesign(member)) {
-            return "You can only mount Sylph Cores on Sylphon designs";
-        }
-
-        //Check if we have a proper ship, but not the proper reputation level to upgrade it
-        if (isValidSylphonDesign(member) && !Global.getSector().getPlayerFaction().isAtWorst(submarket.getFaction(), REPUTATION_TABLE.get(member.getHullSpec().getHullSize()))) {
-            return "Req: " + submarket.getFaction().getDisplayName() + " - " +
-                    REPUTATION_TABLE.get(member.getHullSpec().getHullSize()).getDisplayName().toLowerCase();
-        }
-
-        //If we can't afford the conversion, tell the player
-        if (!playerCanAffordShip(member)) {
-            return "You need 1 " + Global.getSettings().getCommoditySpec(COST_TABLE.get(member.getHullSpec().getHullSize())).getName() + " for this transaction, but you have none.";
-        }
-
-        //Otherwise, something has gone wrong: notify the end user
-        return "AN ERROR OCURRED IN tahlan_GreatHousesConversionSubmarketUNFINISHED.java: CONTACT THE MOD AUTHOR";
+        return "AN ERROR OCURRED IN tahlan_GreatHousesConversionSubmarketUNFINISHED.java: CONTACT Nicke535 OR Nia";
     }
 
     //Checks if the market should be enabled; in our case, we just check if our reputation is good enough AND that the market is owned by the Sylphon
     @Override
     public boolean isEnabled(CoreUIAPI ui) {
         RepLevel level = submarket.getFaction().getRelationshipLevel(Global.getSector().getFaction(Factions.PLAYER));
-        return level.isAtWorst(MIN_STANDING) && this.market.getFactionId().equals("sylphon");
+        return level.isAtWorst(REPUTATION_NEEDED_FOR_MARKET) && this.market.getFactionId().equals(GREAT_HOUSES_FACTION_ID);
     }
 
     //An appendix to the tooltip: I honestly don't know exactly how this works, so trial-and-error it is
     @Override
     public String getTooltipAppendix(CoreUIAPI ui) {
-        //If the ui isn't enabled (we can't enter the market) there are two possibilities: the market isn't owned by the Sylphon, or we don't have enough standing. Tell the player that.
+        //If the ui isn't enabled (we can't enter the market) there are two possibilities: the market isn't owned by the Great Houses, or we don't have enough standing. Tell the player that.
         if (!isEnabled(ui)) {
-            if (!this.market.getFactionId().equals("sylphon")) {
-                return "With the Sylphon driven off from this market, the Sylph Core installation facilities are unavailable.";
+            if (!this.market.getFactionId().equals(GREAT_HOUSES_FACTION_ID)) {
+                return "With the Great Houses driven off from this market, their specialized refit facilities are inoperable.";
             }
             return "Requires: " + submarket.getFaction().getDisplayName() + " - " +
-                    MIN_STANDING.getDisplayName().toLowerCase();
+                    REPUTATION_NEEDED_FOR_MARKET.getDisplayName().toLowerCase();
         }
 
         //Otherwise, we don't add any appendix (this may change later, for clarity)
@@ -174,60 +182,43 @@ public class tahlan_GreatHousesConversionSubmarketUNFINISHED extends BaseSubmark
     @Override
     public boolean isIllegalOnSubmarket(FleetMemberAPI member, TransferAction action) {
         if (action == TransferAction.PLAYER_SELL) {
-            //If we have too little reputation level to upgrade the ship, it's illegal
-            if (!Global.getSector().getPlayerFaction().isAtWorst(submarket.getFaction(), REPUTATION_TABLE.get(member.getHullSpec().getHullSize()))) {
-                return true;
-            }
-
-            //If the ship isn't a valid Sylphon design, it's illegal
-            if (!isValidSylphonDesign(member)) {
-                return true;
-            }
-
-            //Otherwise, check if we can afford it: if we can, it's legal. If we can't, it's illegal
-            return !playerCanAffordShip(member);
+            return false;
         }
 
         //If this wasn't a player selling something, the transaction is legal: we're just getting our stuff back!
         return false;
     }
 
-    //This is the most important part; this gets triggered after a transaction, so we can properly handle the adding of a Sylph Core. Please let this work (>_<)
-    @Override
-    public void reportPlayerMarketTransaction(PlayerMarketTransaction transaction) {
-        for (PlayerMarketTransaction.ShipSaleInfo info : transaction.getShipsSold()) {
-            //Saves the member we are currently manipulating, and ignores it if it is null for any reason
-            FleetMemberAPI member = info.getMember();
-            if (member == null) {continue;}
-
-            //Get the sylphcore-upgraded skin for the ship, and ensure it's the base variant
-            String variantToUpgradeTo = member.getHullSpec().getBaseHullId() + "_sc_Hull";
-
-            //...and remove a core from the player's inventory
-            Global.getSector().getPlayerFleet().getCargo().removeCommodity(COST_TABLE.get(member.getHullSpec().getHullSize()), 1);
-
-            //Then, add it to the "delay" plugin, so it takes a while for the refit to complete (while also removing the member from the market)
-            //Global.getSector().addScript(new SRD_SylphCoreUpgradeTracker(TIME_TABLE.get(member.getHullSpec().getHullSize()), member, variantToUpgradeTo, submarket.getCargo(), market.getPrimaryEntity().getName()));
-            submarket.getCargo().getMothballedShips().removeFleetMember(member);
+    //The class for all the data related to a refit option
+    static class RefitData {
+        private final String destHull;
+        private final String[] componentHulls;
+        RefitData (String destHull, String ... componentHulls) {
+            this.destHull = destHull;
+            this.componentHulls = componentHulls;
         }
     }
 
-    //Shorthand function to check if a ship is *actually* a Sylphon ship, and not an Outcast ship
-    private static boolean isValidSylphonDesign(FleetMemberAPI member) {
-        if (!member.getHullSpec().getBaseHullId().contains("SRD_")) {
-            return false;
-        } else if (member.getVariant().getHullMods().contains("SRD_outcast_engineering")) {
-            return false;
-        } else {
-            return true;
+    //The listener class we use to detect the global market updating
+    class MarketMonthEndReporter implements EconomyUpdateListener {
+        tahlan_GreatHousesConversionSubmarketUNFINISHED source;
+        MarketMonthEndReporter (tahlan_GreatHousesConversionSubmarketUNFINISHED source) {
+            this.source = source;
         }
-    }
 
-    //Shorthand function to check if the player can afford upgrading a specific ship
-    private static boolean playerCanAffordShip(FleetMemberAPI member) {
-        if (Global.getSector().getPlayerFleet().getCargo().getCommodityQuantity(COST_TABLE.get(member.getHullSpec().getHullSize())) >= 1) {
-            return true;
-        } else {
+        //When the economy updates, simply send back that data to the source script
+        @Override
+        public void economyUpdated() {
+            source.reportEconomyHasUpdated();
+        }
+
+        //Do nothing here: we don't care about commodities
+        @Override
+        public void commodityUpdated(String commodityId) {}
+
+        //The listener never expires
+        @Override
+        public boolean isEconomyListenerExpired() {
             return false;
         }
     }
