@@ -5,7 +5,6 @@ package data.scripts.campaign.submarkets;
 
 import com.fs.starfarer.api.Global;
 import com.fs.starfarer.api.campaign.*;
-import com.fs.starfarer.api.campaign.econ.EconomyAPI.EconomyUpdateListener;
 import com.fs.starfarer.api.campaign.econ.SubmarketAPI;
 import com.fs.starfarer.api.fleet.FleetMemberAPI;
 import com.fs.starfarer.api.impl.campaign.ids.Factions;
@@ -15,13 +14,13 @@ import com.fs.starfarer.api.util.Misc;
 
 import java.util.*;
 
-public class tahlan_GreatHousesConversionSubmarketUNFINISHED extends BaseSubmarketPlugin {
+public class tahlan_GreatHousesConversionSubmarket extends BaseSubmarketPlugin {
 
     //This is how much reputation is needed to be allowed into the Great Houses submarket.
     private static final RepLevel REPUTATION_NEEDED_FOR_MARKET = RepLevel.WELCOMING;
 
     //The ID of the Great Houses faction
-    private static final String GREAT_HOUSES_FACTION_ID = "tahlan_great_houses";
+    private static final String GREAT_HOUSES_FACTION_ID = "tahlan_greathouses";
 
     //A list of all valid refits and their data. The refits at the top of the list take precedence if multiple
     //alternatives could be "crafted", but overlap should still be avoided
@@ -33,7 +32,9 @@ public class tahlan_GreatHousesConversionSubmarketUNFINISHED extends BaseSubmark
 
 
     //Initialize some in-script variables used here and there
-    private MarketMonthEndReporter updateListener = null;
+    private int lastAppliedMonth = 0;
+    private List<FleetMemberAPI> leftoversLastMonth = new ArrayList<>();
+    private List<FleetMemberAPI> excludedFromTrimming = new ArrayList<>();
 
     //Initializer function; just run the original init
     @Override
@@ -67,51 +68,115 @@ public class tahlan_GreatHousesConversionSubmarketUNFINISHED extends BaseSubmark
 
     //Changes the verb for selling/bying ships (go figure!)
     @Override
-    public String getSellVerb() {
-        return "Deposit";
-    }
+    public String getSellVerb() { return "Deposit"; }
     @Override
-    public String getBuyVerb() {
-        return "Retrieve";
-    }
+    public String getBuyVerb() { return "Retrieve"; }
 
 
-    //The main advance() function: mostly just adds a listener to the economy
+    //The main advance() function: mostly just detects if a month has passed, and calls our monthly application if so
     @Override
     public void advance(float amount) {
         //Run our overridden advance function
         super.advance(amount);
 
-        //Get us an economy listener, if we don't already have one
-        if (updateListener == null) {
-            updateListener = new MarketMonthEndReporter(this);
-            Global.getSector().getEconomy().addUpdateListener(updateListener);
+        //Only tick on the second day each month
+        if (Global.getSector().getClock().getDay() != 2) {
+            return;
+        }
+
+        //Checks our clock to see if our month is different from last time we ticked; if it is, we run a tick
+        if (Global.getSector().getClock().getMonth() > lastAppliedMonth) {
+            lastAppliedMonth = Global.getSector().getClock().getMonth();
+            monthlyApplication();
         }
     }
 
 
-    //This is the function that gets called by our economy update listener when the economy updates
-    public void reportEconomyHasUpdated () {
-        //Go through all our refit datas, and see which ones match. Keep going until we've tried them all and failed them
+    //This function runs once a month, and handles the amalgamation process
+    private void monthlyApplication() {
+        //Go through all our refit data, and see which ones match. Keep going until we've tried them all and failed them
+        List<String> completedRefits = new ArrayList<>();
         boolean shouldBreakFull = false;
         while (!shouldBreakFull) {
+            shouldBreakFull = true;
             for (RefitData data : REFIT_DATAS) {
-                //Stores a varible for each component hull type, so we know how many we need
+                //Stores a varible for each component hull type, so we know how many we need of each
                 Map<String, Integer> requiredHulls = new HashMap<>();
                 for (int i = 0; i < data.componentHulls.length; i++) {
                     if (requiredHulls.containsKey(data.componentHulls[i])) {
                         requiredHulls.put(data.componentHulls[i], requiredHulls.get(data.componentHulls[i])+1);
+                    } else {
+                        requiredHulls.put(data.componentHulls[i], 1);
                     }
                 }
 
-                //CONTINUE HERE
+                //Then, go through the ships in our cargo to see if we have enough to actually create the refit
+                List<FleetMemberAPI> membersToRemove = new ArrayList<>();
+                for (FleetMemberAPI member : getCargo().getMothballedShips().getMembersInPriorityOrder()) {
+                    //Ignore any ships that aren't required
+                    if (requiredHulls.containsKey(member.getHullSpec().getBaseHullId())) {
+                        //This hull was required; tick down how many hulls we need
+                        requiredHulls.put(member.getHullSpec().getBaseHullId(), requiredHulls.get(member.getHullSpec().getBaseHullId())-1);
 
-                //First, find if the submarket has the ships needed for the refit
-                for (FleetMemberAPI member : getCargo().getMothballedShips().getMembersListCopy()) {
+                        //If that was the last hull we needed, remove the requirement
+                        if (requiredHulls.get(member.getHullSpec().getBaseHullId()) <= 0) {
+                            requiredHulls.remove(member.getHullSpec().getBaseHullId());
+                        }
 
+                        //Finally, register that this hull is to be removed upon amalgamation
+                        membersToRemove.add(member);
+                    }
+                }
+
+                //If all our requirements were fulfilled, remove the appropriate members, register the refit as complete
+                //Also break the loop so we have to start over from the beginning again
+                if (requiredHulls.isEmpty()) {
+                    for (FleetMemberAPI member : membersToRemove) {
+                        getCargo().getMothballedShips().removeFleetMember(member);
+                    }
+                    completedRefits.add(data.destHull);
+                    shouldBreakFull = false;
+                    break;
                 }
             }
-            shouldBreakFull = true;
+        }
+
+        //Go through all ships left over, except the ones that are excluded from "trimming". Remove all the ones that were also leftover last month
+        List<FleetMemberAPI> trimList = new ArrayList<>();
+        for (FleetMemberAPI member : getCargo().getMothballedShips().getMembersInPriorityOrder()) {
+            if (excludedFromTrimming.contains(member)) {
+                continue;
+            }
+
+            //Check if this member is was already marked for trimming last month. If so, we're gonna delete them later
+            if (leftoversLastMonth.contains(member)) {
+                trimList.add(member);
+                leftoversLastMonth.remove(member);
+            }
+
+            //Otherwise, we add them to the leftovers
+            else {
+                leftoversLastMonth.add(member);
+            }
+        }
+        for (FleetMemberAPI member : trimList) {
+            getCargo().getMothballedShips().removeFleetMember(member);
+        }
+
+        //Now that we're done with finding all the ships we completed refit-wise, we show a message to the player that their refits are done...
+        if (!completedRefits.isEmpty()) {
+            Global.getSector().getCampaignUI().addMessage(
+                    market.getName() + ": One or more Great Houses Refits have been successfully completed.",
+                    Global.getSettings().getColor("standardTextColor"),
+                    market.getName(), "Great Houses Refits",
+                    market.getFaction().getBaseUIColor(),
+                    Global.getSettings().getColor("yellowTextColor"));
+        }
+
+        //...and add all the ships to the submarket
+        for (String hullID : completedRefits) {
+            FleetMemberAPI newMember = getCargo().getMothballedShips().addFleetMember(hullID + "_Hull");
+            excludedFromTrimming.add(newMember);
         }
     }
 
@@ -123,14 +188,14 @@ public class tahlan_GreatHousesConversionSubmarketUNFINISHED extends BaseSubmark
             return "This submarket does not conduct commodity trade.";
         }
 
-        return "AN ERROR OCURRED IN tahlan_GreatHousesConversionSubmarketUNFINISHED.java: CONTACT Nicke535 OR Nia";
+        return "AN ERROR OCURRED IN tahlan_GreatHousesConversionSubmarket.java: CONTACT Nicke535 OR Nia";
     }
 
     //Description text for trying to sell a ship to the submarket that you, for some reason, can't.
     //This should never appear, so always show error text
     @Override
     public String getIllegalTransferText(FleetMemberAPI member, TransferAction action) {
-        return "AN ERROR OCURRED IN tahlan_GreatHousesConversionSubmarketUNFINISHED.java: CONTACT Nicke535 OR Nia";
+        return "AN ERROR OCURRED IN tahlan_GreatHousesConversionSubmarket.java: CONTACT Nicke535 OR Nia";
     }
 
     //Checks if the market should be enabled; in our case, we just check if our reputation is good enough AND that the market is owned by the Sylphon
@@ -196,30 +261,6 @@ public class tahlan_GreatHousesConversionSubmarketUNFINISHED extends BaseSubmark
         RefitData (String destHull, String ... componentHulls) {
             this.destHull = destHull;
             this.componentHulls = componentHulls;
-        }
-    }
-
-    //The listener class we use to detect the global market updating
-    class MarketMonthEndReporter implements EconomyUpdateListener {
-        tahlan_GreatHousesConversionSubmarketUNFINISHED source;
-        MarketMonthEndReporter (tahlan_GreatHousesConversionSubmarketUNFINISHED source) {
-            this.source = source;
-        }
-
-        //When the economy updates, simply send back that data to the source script
-        @Override
-        public void economyUpdated() {
-            source.reportEconomyHasUpdated();
-        }
-
-        //Do nothing here: we don't care about commodities
-        @Override
-        public void commodityUpdated(String commodityId) {}
-
-        //The listener never expires
-        @Override
-        public boolean isEconomyListenerExpired() {
-            return false;
         }
     }
 }

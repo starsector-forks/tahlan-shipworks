@@ -1,0 +1,7 @@
+id,name,faction,desc,script,icon,order
+tahlan_great_house_refits,"Great Houses
+Refits",tahlan_greathouses,"While the Great Houses generally don't sell their ships to outsiders, they are willing to construct ships for some of their most valued clients, should said clients bring along the raw materials required for the construction.
+
+All ships sold to this market will be turned into Great Houses refits at the start of each month. While the specific ships required are not disclosed, you figure you can piece together most of the information from the various ships' Codex entries.
+
+Ships that are not used for materials will be broken down for raw materials if left lying too long.",data.scripts.campaign.submarkets.tahlan_GreatHousesConversionSubmarket,graphics/sylphon/factions/tahlan_greathouses.png,200
