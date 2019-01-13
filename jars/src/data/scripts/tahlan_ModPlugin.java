@@ -8,6 +8,7 @@ import org.dark.shaders.util.TextureData;
 
 public class tahlan_ModPlugin extends BaseModPlugin {
 
+    //Application loading stuff; mostly compatibility checks
     @Override
     public void onApplicationLoad() {
         boolean hasLazyLib = Global.getSettings().getModManager().isModEnabled("lw_lazylib");
@@ -32,4 +33,11 @@ public class tahlan_ModPlugin extends BaseModPlugin {
 
     }
 
+    //New game stuff. Currently, it's just to prevent the Vendetta (GH) from spawning in fleets without the correct mod
+    @Override
+    public void onNewGame() {
+        if (Global.getSettings().getModManager().isModEnabled("DisassembleReassemble")) {
+            Global.getSector().getFaction("tahlan_greathouses").addKnownShip("tahlan_vendetta_gh", true);
+        }
+    }
 }
