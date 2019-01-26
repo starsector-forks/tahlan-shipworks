@@ -72,9 +72,14 @@ public class tahlan_GenerateKassadarScript {
                 new ArrayList<>(
                         Arrays.asList(
                                 Conditions.POPULATION_4,
-                                Conditions.ORE_SPARSE,
+                                Conditions.ORE_ABUNDANT,
                                 Conditions.RARE_ORE_MODERATE,
-                                Conditions.COLD)),
+                                Conditions.ORGANICS_TRACE,
+                                Conditions.VOLATILES_DIFFUSE,
+                                Conditions.FARMLAND_POOR,
+                                Conditions.HOT,
+                                Conditions.DENSE_ATMOSPHERE,
+                                Conditions.HABITABLE)),
                 new ArrayList<>(
                         Arrays.asList( // Which submarkets to generate
                                 Submarkets.GENERIC_MILITARY,
@@ -99,7 +104,7 @@ public class tahlan_GenerateKassadarScript {
         kassadar_market.setEconGroup(kassadar_market.getId());
 
         //Then, add some memory hooks; we want to be able to find this thing later
-        sector.getMemory().set(KASSADAR_PLANET_KEY, kassadar);
+        sector.getMemoryWithoutUpdate().set(KASSADAR_PLANET_KEY, kassadar);
         kassadar.getTags().add(KASSADAR_INTERACTION_TAG);
     }
 
