@@ -2,14 +2,15 @@ package data.scripts;
 
 import com.fs.starfarer.api.BaseModPlugin;
 import com.fs.starfarer.api.Global;
+import com.fs.starfarer.api.impl.campaign.ids.Factions;
 import com.fs.starfarer.api.impl.campaign.intel.bar.events.BarEventManager;
 import data.scripts.campaign.bar.hunt_for_kassadar.tahlan_HuntForKassadarBarEventCreator;
+import data.scripts.campaign.sectorgen.tahlan_GenerateKassadarScript;
 import org.dark.shaders.light.LightData;
 import org.dark.shaders.util.ShaderLib;
 import org.dark.shaders.util.TextureData;
 
-public class tahlan_ModPlugin extends BaseModPlugin {
-    //Stores if we use ShaderLib; enables some fancier functions to be used down-the-line since we're tracking it
+public class tahlan_ModPlugin extends BaseModPlugin {//Stores if we use ShaderLib; enables some fancier functions to be used down-the-line since we're tracking it
     static private boolean graphicsLibAvailable = false;
     static public boolean isGraphicsLibAvailable () {
         return graphicsLibAvailable;
@@ -42,14 +43,19 @@ public class tahlan_ModPlugin extends BaseModPlugin {
         }
     }
 
-    //New game stuff. Currently, it's just to prevent the Vendetta (GH) from spawning in fleets without the correct mod
+    //New game stuff
     @Override
     public void onNewGame() {
+        //Prevents Vendetta (GH) from appearing in fleets unless DaRa is installed
         if (Global.getSector().getFaction("tahlan_greathouses") != null) {
-            if (Global.getSettings().getModManager().isModEnabled("DisassembleReassemble")) {
-                Global.getSector().getFaction("tahlan_greathouses").addKnownShip("tahlan_vendetta_gh", true);
+            if (!Global.getSettings().getModManager().isModEnabled("DisassembleReassemble")) {
+                Global.getSector().getFaction("tahlan_greathouses").removeKnownShip("tahlan_vendetta_gh");
+                Global.getSector().getFaction(Factions.INDEPENDENT).removeKnownShip("tahlan_vendetta_gh");
             }
         }
+
+        //Generates Kassadar into the sector
+        tahlan_GenerateKassadarScript.generate(Global.getSector());
     }
 
 

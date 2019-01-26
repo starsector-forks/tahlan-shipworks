@@ -25,10 +25,11 @@ import com.fs.starfarer.api.util.WeightedRandomPicker;
 
 import java.awt.*;
 
+import static data.scripts.campaign.sectorgen.tahlan_GenerateKassadarScript.KASSADAR_PLANET_KEY;
+
 public class tahlan_HuntForKassadarBarEvent extends BaseBarEventWithPerson {
 
 	//Handles our various memory keys we will be using later
-	public static String PROMISE_OMICRON_KEY = "$promise_Omicron";
 	public static String PROMISE_MINION_KEY = "$promise_Minion";
 	public static String PROMISE_SYSTEM1_KEY = "$promise_system1";
 	public static String PROMISE_SYSTEM2_KEY = "$promise_system2";
@@ -50,7 +51,7 @@ public class tahlan_HuntForKassadarBarEvent extends BaseBarEventWithPerson {
 
 	// get Omicron's entity
 	public static AddedEntity getOmicron() {
-		return (AddedEntity) Global.getSector().getMemoryWithoutUpdate().get(PROMISE_OMICRON_KEY);
+		return (AddedEntity) Global.getSector().getMemoryWithoutUpdate().get(KASSADAR_PLANET_KEY);
 	}
 
 	// get the frigate's system location
@@ -142,7 +143,7 @@ public class tahlan_HuntForKassadarBarEvent extends BaseBarEventWithPerson {
 		Global.getSector().getMemoryWithoutUpdate().set(PROMISE_MINION_KEY, minion);
 
 		AddedEntity omicron = BaseThemeGenerator.addNonSalvageEntity(system2, loc2, "omicron_object", "independent");
-		Global.getSector().getMemoryWithoutUpdate().set(PROMISE_OMICRON_KEY, omicron);
+		Global.getSector().getMemoryWithoutUpdate().set(KASSADAR_PLANET_KEY, omicron);
 
 		AddedEntity station = BaseThemeGenerator.addEntity(system2, loc3, "promise_station", Factions.NEUTRAL);
 
@@ -237,7 +238,7 @@ public class tahlan_HuntForKassadarBarEvent extends BaseBarEventWithPerson {
 		optionSelected(null, OptionId.INIT);
 	}
 
-	// the dialogue itself
+	//The dialogue itself
 	@Override
 	public void optionSelected(String optionText, Object optionData) {
 		if (!(optionData instanceof OptionId)) {
