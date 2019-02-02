@@ -294,14 +294,20 @@ public class tahlan_ProjectileTrailHandlerPlugin extends BaseEveryFrameCombatPlu
                 }
             }
 
-            //Gets a custom "offset" position, so we can slightly alter the spawn location to account for "natural fade-in", and add that to our spawn position
-            Vector2f offsetPoint = new Vector2f((float) Math.cos(Math.toRadians(proj.getFacing())) * TRAIL_SPAWN_OFFSETS.get(specID), (float) Math.sin(Math.toRadians(proj.getFacing())) * TRAIL_SPAWN_OFFSETS.get(specID));
-            Vector2f spawnPosition = new Vector2f(offsetPoint.x + proj.getLocation().x, offsetPoint.y + proj.getLocation().y);
-
             //Sideway offset velocity, for projectiles that use it
             Vector2f projBodyVel = VectorUtils.rotate(projVel, -proj.getFacing());
             Vector2f projLateralBodyVel = new Vector2f(0f, projBodyVel.getY());
             Vector2f sidewayVel = (Vector2f) VectorUtils.rotate(projLateralBodyVel, proj.getFacing()).scale(LATERAL_COMPENSATION_MULT.get(specID));
+
+            //Gets a custom "offset" position, so we can slightly alter the spawn location to account for "natural fade-in", and add that to our spawn position
+            Vector2f offsetPoint = new Vector2f((float) Math.cos(Math.toRadians(proj.getFacing())) * TRAIL_SPAWN_OFFSETS.get(specID), (float) Math.sin(Math.toRadians(proj.getFacing())) * TRAIL_SPAWN_OFFSETS.get(specID));
+            Vector2f spawnPosition = new Vector2f(offsetPoint.x + proj.getLocation().x, offsetPoint.y + proj.getLocation().y);
+
+            //Offsets *slightly more* to account for a weird location error. Only works on non-Ballistic As Beam projectiles
+            if (proj.getSpawnType() != ProjectileSpawnType.BALLISTIC_AS_BEAM) {
+                spawnPosition.x += sidewayVel.x * amount * -1.05f;
+                spawnPosition.y += sidewayVel.y * amount * -1.05f;
+            }
 
             //Opacity adjustment for fade-out, if the projectile uses it
             float opacityMult = 1f;

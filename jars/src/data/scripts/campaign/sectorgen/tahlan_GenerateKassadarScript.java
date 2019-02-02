@@ -18,7 +18,7 @@ import java.util.LinkedHashMap;
 public class tahlan_GenerateKassadarScript {
     //The memory keys to use when storing data about Kassadar, and some other stuff for rules.csv
     public static String KASSADAR_PLANET_KEY = "$tahlan_kassadar_planet";
-    public static String KASSADAR_INTERACTION_TAG = "tahlan_kassadar_planet_locked_tag";
+    public static String KASSADAR_INTERACTION_TAG = "tahlan_kassadar_plane t_locked_tag";
 
 
     //An offset for calculating spawn probability; lower values mean that the system has a larger chance of appearing
